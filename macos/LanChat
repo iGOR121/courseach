@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+# Entry point of the LanChat.app bundle. Double-clicking the app runs this.
+#
+# It launches the chat inside Terminal using `open` (LaunchServices) rather
+# than an AppleScript `tell application "Terminal"`. Apple Events require the
+# user to grant "Automation" permission (System Settings -> Privacy & Security
+# -> Automation), which unsigned apps often cannot obtain, producing:
+#     "LanChat has no permissions for sending Apple Events (receiver: Terminal)"
+# The `open` command avoids that entirely.
+
+set -euo pipefail
+
+bundle_dir="$(cd "$(dirname "$0")/.." && pwd)"
+launcher="$bundle_dir/Resources/app/launch.command"
+
+if [ ! -f "$launcher" ]; then
+	echo "LanChat: bundled launch script missing. Rebuild with macos/build_app.sh." >&2
+	exit 1
+fi
+
+# Hand the script to Terminal without sending it any Apple Events.
+exec open -a Terminal "$launcher"
