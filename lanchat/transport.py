@@ -2,8 +2,10 @@
 
 Messages are newline-delimited JSON objects, UTF-8 encoded. A sender opens a
 short-lived TCP connection, writes a ``hello`` frame, one or more ``chat``
-frames and a ``bye`` frame, then closes. The receiver runs a small threaded
-server and hands every parsed frame to a callback.
+frames and a ``bye`` frame, then closes. The receiver runs a small TCP server
+that handles one connection at a time and hands every parsed frame to a
+callback. Handling connections sequentially keeps messages from one sender in
+order.
 
 Keeping the connection short-lived makes the app stateless and robust: a
 dropped connection never leaves a half-open chat behind.
@@ -14,8 +16,9 @@ from __future__ import annotations
 import json
 import socket
 import socketserver
+import threading
 import time
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
 # Types of frame that travel over TCP.
 TYPE_HELLO = "hello"
@@ -23,26 +26,50 @@ TYPE_CHAT = "chat"
 TYPE_BYE = "bye"
 
 
-class ChatServer(socketserver.ThreadingTCPServer):
-    """Threaded TCP server that decodes frames and forwards them."""
+class ChatServer(socketserver.TCPServer):
+    """TCP server that decodes frames and forwards them."""
 
     allow_reuse_address = True
-    daemon_threads = True
+    request_queue_size = 32
 
-    def __init__(self, address, handler, local_id: str, local_nick: str) -> None:
-        self.local_id = local_id
-        self.local_nick = local_nick
+    def __init__(self, address, handler) -> None:
         self.on_message: Optional[Callable[[dict], None]] = None
+        self._active_request: Optional[socket.socket] = None
+        self._active_lock = threading.Lock()
         super().__init__(address, handler)
 
     @property
     def port(self) -> int:
         return self.server_address[1]
 
+    def process_request(self, request, client_address) -> None:
+        with self._active_lock:
+            self._active_request = request
+        try:
+            super().process_request(request, client_address)
+        finally:
+            with self._active_lock:
+                self._active_request = None
 
-class _ChatHandler(socketserver.StreamRequestHandler):
+    def close_active(self) -> None:
+        """Unblock a client that is holding up shutdown."""
+        with self._active_lock:
+            request = self._active_request
+        if request is None:
+            return
+        try:
+            request.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            request.close()
+        except OSError:
+            pass
+
+
+class ChatHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        self.connection.settimeout(30.0)
+        self.connection.settimeout(10.0)
         try:
             for raw in self.rfile:
                 raw = raw.strip()
@@ -50,11 +77,12 @@ class _ChatHandler(socketserver.StreamRequestHandler):
                     continue
                 try:
                     msg = json.loads(raw.decode("utf-8"))
-                except (ValueError, UnicodeDecodeError):
+                except (ValueError, UnicodeDecodeError, RecursionError):
+                    continue
+                if not isinstance(msg, dict):
                     continue
                 # Let the app know where the message came from.
-                if isinstance(msg, dict):
-                    msg["_addr"] = self.client_address[0]
+                msg["_addr"] = self.client_address[0]
                 callback = self.server.on_message
                 if callback is not None:
                     try:
@@ -91,6 +119,8 @@ def send_chat(
     timeout: float = 5.0,
 ) -> None:
     """Deliver one message to a peer. Raises OSError if it cannot connect."""
+    if not 1 <= port <= 65535:
+        raise OSError(f"invalid TCP port {port}")
     payload = encode_frames(local_id, local_nick, text)
     with socket.create_connection((host, port), timeout=timeout) as sock:
         sock.sendall(payload)

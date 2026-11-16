@@ -1,5 +1,7 @@
 # lanchat
 
+**English** | [Русский](README.ru.md)
+
 A tiny peer-to-peer chat for devices on the same **Wi-Fi / LAN**. No server,
 no internet, no accounts, no third-party packages — just the Python standard
 library.
@@ -23,22 +25,16 @@ python3 -m lanchat --nick alice     # on the first device
 python3 -m lanchat --nick bob       # on the second device
 ```
 
-You can also run the file directly:
-
-```bash
-python3 lanchat/app.py --nick alice
-```
-
 Once running:
 
 ```
 Signed in as alice  |  listening on port 57092
 > /peers
-Peers:
+Peers (1):
   [1] bob @ 192.168.1.23:57093
 > /to bob
 Now talking to bob (192.168.1.23:57093).
-> hey bob, can you hear me?
+[bob]> hey bob, can you hear me?
 ```
 
 ## Commands
@@ -50,21 +46,21 @@ Now talking to bob (192.168.1.23:57093).
 | `/msg <peer> <text>` | Send one message without changing the target |
 | `/me <text>` | Send an action-style message (`* alice waves`) |
 | `/nick <name>` | Change your nickname |
-| `/add <host> <port> [nick]` | Add a peer by address (when auto-discovery is blocked) |
+| `/add <host> <port> [nick]` | Add a peer by address (also accepts `host:port`) |
 | `/clear` | Clear the screen |
 | `/help` | Show help |
 | `/quit` | Leave |
 
 A `<peer>` can be a nickname, a nickname prefix, the number from `/peers`, or
-an `host:port` address.
+a `host:port` address.
 
 If exactly one peer is online you can just type — messages go to them without
-`/to`.
+`/to`. The prompt shows the current target in brackets, for example `[bob]>`.
 
 ## Options
 
 ```
--n, --nick NAME          nickname (default: your OS username)
+-n, --nick NAME          nickname, max 64 chars (default: your OS username)
     --group ADDR         multicast group (default: 239.255.42.99)
     --discovery-port N   discovery port (default: 47820)
     --tcp-port N         fixed TCP port (default: random)
@@ -91,17 +87,19 @@ Two instances on the same machine work fine (useful for testing). Use
   some networks pass one but not the other. When it first hears a new peer it
   also sends it a **direct unicast hello**, so a device that cannot receive
   multicast (common on Wi-Fi) still gets discovered. Peers not heard from for
-  12 seconds are dropped; a `bye` frame on exit removes them instantly.
+  12 seconds are dropped; a `bye` frame on exit removes them instantly, and it
+  is sent directly to known peers as well so unicast-only devices notice too.
   Multicast is also what lets two instances on *one* machine see each other.
-- `lanchat/transport.py` — a small threaded TCP server. Each message opens a
+- `lanchat/transport.py` — a small TCP server. Each message opens a
   short-lived connection, writes the frames, and closes, so a dropped
-  connection never leaves a broken chat behind.
+  connection never leaves a broken chat behind. Connections are handled one at
+  a time, which keeps messages from the same sender in order.
 - `lanchat/app.py` — ties the two together and provides the terminal UI.
 
 ## Testing
 
-An end-to-end self-test starts two nodes and checks discovery, messaging,
-nickname changes and departure:
+An end-to-end self-test starts two nodes and checks discovery, messaging
+(including message order), nickname changes and departure:
 
 ```bash
 python3 selftest.py

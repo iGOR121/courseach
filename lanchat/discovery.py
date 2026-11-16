@@ -17,7 +17,7 @@ import socket
 import struct
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Optional
 
 # Bumped if the wire format ever changes.
@@ -34,6 +34,9 @@ BROADCAST_ADDR = "255.255.255.255"
 # How often we tell the network we exist, and when we consider a peer gone.
 ANNOUNCE_INTERVAL = 3.0
 PEER_TIMEOUT = 12.0
+
+# Long nicknames would make discovery packets too large for the receive buffer.
+MAX_NICK_LENGTH = 64
 
 
 @dataclass
@@ -109,8 +112,14 @@ class Discovery:
         sock = self._sock
         if sock is not None:
             # Tell everyone we are leaving so they can drop us immediately.
+            # Send to the usual group/broadcast targets *and* directly to every
+            # known host, since a peer that cannot receive multicast may only
+            # see the unicast copy.
             bye = {"magic": MAGIC, "type": "bye", "id": self.peer_id}
-            for address in self._targets():
+            targets = set(self._targets())
+            with self._lock:
+                targets.update(peer.host for peer in self._peers.values())
+            for address in targets:
                 try:
                     self._send_to(sock, bye, address)
                 except OSError:
@@ -156,7 +165,7 @@ class Discovery:
             "magic": MAGIC,
             "type": "hello",
             "id": self.peer_id,
-            "nick": self._nick_provider(),
+            "nick": str(self._nick_provider())[:MAX_NICK_LENGTH],
             "tcp_port": self.tcp_port,
         }
 
@@ -209,18 +218,24 @@ class Discovery:
                 continue
             except OSError:
                 break  # socket closed during shutdown
-            self._handle(data, addr)
+            try:
+                self._handle(data, addr)
+            except Exception:
+                # A malformed or unexpected packet must never stop discovery.
+                continue
 
     def _handle(self, data: bytes, addr) -> None:
+        if self._stop.is_set():
+            return
         try:
             msg = json.loads(data.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             return
 
-        if msg.get("magic") != MAGIC:
+        if not isinstance(msg, dict) or msg.get("magic") != MAGIC:
             return
         peer_id = msg.get("id")
-        if not peer_id or peer_id == self.peer_id:
+        if not isinstance(peer_id, str) or not peer_id or peer_id == self.peer_id:
             return  # malformed, or our own looped-back announcement
 
         self.received += 1
@@ -236,28 +251,30 @@ class Discovery:
                     tcp_port = int(msg.get("tcp_port") or 0)
                 except (TypeError, ValueError):
                     return
-                if tcp_port <= 0:
+                if not 1 <= tcp_port <= 65535:
                     return
 
-                nick = str(msg.get("nick") or "?")
+                nick = str(msg.get("nick") or "?")[:MAX_NICK_LENGTH]
                 peer = self._peers.get(peer_id)
                 if peer is None:
-                    self._peers[peer_id] = Peer(peer_id, nick, addr[0], tcp_port)
+                    peer = Peer(peer_id, nick, addr[0], tcp_port)
+                    self._peers[peer_id] = peer
                     notify = True
                     new_peer_host = addr[0]
                 elif (peer.nick, peer.host, peer.tcp_port) != (nick, addr[0], tcp_port):
-                    # Nickname or port changed - refresh it.
+                    # Nickname, address or port changed - refresh it.
                     peer.nick, peer.host, peer.tcp_port = nick, addr[0], tcp_port
                     notify = True
-                else:
-                    peer.last_seen = time.time()
+                # Always refresh liveness, including on the announcement that
+                # changed the peer's details.
+                peer.last_seen = time.time()
 
         # Answer a brand new peer directly, in case it cannot hear multicast.
         if new_peer_host is not None:
             self._reply_to(new_peer_host)
 
-        if notify and self.on_change is not None:
-            self.on_change(self)
+        if notify:
+            self._notify_change()
 
     def _announce_loop(self) -> None:
         while not self._stop.is_set():
@@ -279,13 +296,25 @@ class Discovery:
             for peer_id in [pid for pid, p in self._peers.items() if p.last_seen < cutoff]:
                 del self._peers[peer_id]
                 removed = True
-        if removed and self.on_change is not None:
-            self.on_change(self)
+        if removed:
+            self._notify_change()
+
+    def _notify_change(self) -> None:
+        callback = self.on_change
+        if callback is not None:
+            try:
+                callback(self)
+            except Exception:
+                # A faulty UI callback must not stop discovery.
+                pass
 
     def snapshot(self) -> List[Peer]:
+        """A stable copy of the peer list, safe to use from another thread."""
         with self._lock:
-            return sorted(self._peers.values(), key=lambda p: (p.nick.lower(), p.host))
+            peers = sorted(self._peers.values(), key=lambda p: (p.nick.lower(), p.host))
+            return [replace(peer) for peer in peers]
 
     def get(self, peer_id: str) -> Optional[Peer]:
         with self._lock:
-            return self._peers.get(peer_id)
+            peer = self._peers.get(peer_id)
+            return replace(peer) if peer is not None else None

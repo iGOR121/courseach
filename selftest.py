@@ -56,6 +56,28 @@ def main() -> int:
             return 1
         print("OK: messaging works (bob received alice's message)")
 
+        # Messages sent back-to-back should arrive in the same order.
+        with lock:
+            received.clear()
+        texts = [f"ordered {index}" for index in range(10)]
+        for text in texts:
+            alice.send(peer, text)
+
+        def ordered_arrived():
+            with lock:
+                return [
+                    f.get("text")
+                    for f in received
+                    if str(f.get("text", "")).startswith("ordered ")
+                ]
+
+        ok = wait_for(lambda: len(ordered_arrived()) >= len(texts))
+        arrived = ordered_arrived()
+        if not ok or arrived != texts:
+            print(f"FAIL: messages arrived out of order: {arrived}")
+            return 1
+        print("OK: back-to-back messages stay in order")
+
         # Nickname changes should propagate on the next announcement.
         alice.nick = "alice2"
         ok = wait_for(lambda: any(p.nick == "alice2" for p in bob.peers()))
