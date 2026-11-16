@@ -9,6 +9,10 @@ library.
 Devices find each other automatically with UDP multicast and send messages
 directly to each other over TCP.
 
+The package has two front ends: a terminal UI (`python3 -m lanchat`) and a
+Tkinter GUI (`python3 -m lanchat.gui`). They share the same backend and can
+chat with each other.
+
 ## Requirements
 
 - Python 3.8+
@@ -37,7 +41,21 @@ Now talking to bob (192.168.1.23:57093).
 [bob]> hey bob, can you hear me?
 ```
 
-## Commands
+### Tkinter GUI
+
+Prefer a window? Start the GUI instead:
+
+```bash
+python3 -m lanchat.gui --nick alice
+```
+
+It provides a peer list, a chat pane, nickname changes, and an **Add peer**
+dialog. It uses the same `App` backend, so GUI and CLI peers can chat with each
+other. Tkinter is part of the Python standard library, but some Linux
+distributions package it separately (for example,
+`sudo apt install python3-tk`). No `pip install` is required.
+
+## CLI commands
 
 | Command | What it does |
 | --- | --- |
@@ -57,7 +75,7 @@ a `host:port` address.
 If exactly one peer is online you can just type — messages go to them without
 `/to`. The prompt shows the current target in brackets, for example `[bob]>`.
 
-## Options
+## CLI options
 
 ```
 -n, --nick NAME          nickname, max 64 chars (default: your OS username)
@@ -69,6 +87,9 @@ If exactly one peer is online you can just type — messages go to them without
 
 Two instances on the same machine work fine (useful for testing). Use
 `--discovery-port` / `--group` to run separate chat "rooms".
+
+The GUI accepts the same `--nick`, `--group`, `--discovery-port` and
+`--tcp-port` options; run `python3 -m lanchat.gui --help` for details.
 
 ## How it works
 
@@ -95,6 +116,7 @@ Two instances on the same machine work fine (useful for testing). Use
   connection never leaves a broken chat behind. Connections are handled one at
   a time, which keeps messages from the same sender in order.
 - `lanchat/app.py` — ties the two together and provides the terminal UI.
+- `lanchat/gui.py` — optional Tkinter front end built on the same `App`.
 
 ## Testing
 

@@ -2,7 +2,8 @@
 
 Devices on the same Wi-Fi / LAN find each other automatically (UDP multicast)
 and exchange messages directly over TCP. No server, no internet, no
-dependencies beyond the Python standard library.
+dependencies beyond the Python standard library. A terminal UI and a Tkinter
+GUI are included.
 """
 
 from .app import App
