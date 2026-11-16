@@ -55,6 +55,10 @@ other. Tkinter is part of the Python standard library, but some Linux
 distributions package it separately (for example,
 `sudo apt install python3-tk`). No `pip install` is required.
 
+![Two lanchat GUI windows chatting](pic.png)
+
+*Two lanchat GUI instances chatting on the local network.*
+
 ## CLI commands
 
 | Command | What it does |
