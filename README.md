@@ -49,11 +49,12 @@ Prefer a window? Start the GUI instead:
 python3 -m lanchat.gui --nick alice
 ```
 
-It provides a peer list, a chat pane, nickname changes, and an **Add peer**
-dialog. It uses the same `App` backend, so GUI and CLI peers can chat with each
-other. Tkinter is part of the Python standard library, but some Linux
-distributions package it separately (for example,
-`sudo apt install python3-tk`). No `pip install` is required.
+It opens with a nickname screen; press **Start** to join. It provides a peer
+list, a chat pane, nickname changes, and an **Add peer** dialog. It uses the
+same `App` backend, so GUI and CLI peers can chat with each other. Tkinter is
+part of the Python standard library, but some Linux distributions package it
+separately (for example, `sudo apt install python3-tk`). No `pip install` is
+required.
 
 ![Two lanchat GUI windows chatting](pic.png)
 

@@ -70,6 +70,33 @@ def _default_nick() -> str:
     return "anon"
 
 
+def _center_window(root: tk.Tk, width: int, height: int) -> None:
+    root.update_idletasks()
+    x = max(0, (root.winfo_screenwidth() - width) // 2)
+    y = max(0, (root.winfo_screenheight() - height) // 3)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+
+
+def _make_ascii_logo(parent: tk.Misc) -> tk.Label:
+    fixed = tkfont.nametofont("TkFixedFont")
+    family = fixed.actual("family")
+    # Keep the wide ASCII banner from making the About dialog enormous.
+    size = max(6, min(abs(int(fixed.actual("size"))), 8))
+    return tk.Label(
+        parent,
+        text=BANNER.strip("\n"),
+        font=(family, size),
+        justify="left",
+        anchor="w",
+        background="#1e1e1e",
+        foreground="#f2f2f2",
+        padx=14,
+        pady=12,
+        highlightthickness=1,
+        highlightbackground="#3a3a3a",
+    )
+
+
 class LanChatGUI:
     """Tkinter UI around a single :class:`lanchat.app.App` node."""
 
@@ -138,7 +165,7 @@ class LanChatGUI:
         self.root.minsize(760, 500)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(2, weight=1)
-        self._center_window()
+        _center_window(self.root, 940, 640)
 
         style = ttk.Style(self.root)
         family = tkfont.nametofont("TkDefaultFont").actual("family")
@@ -306,13 +333,6 @@ class LanChatGUI:
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self.root.configure(menu=menubar)
-
-    def _center_window(self) -> None:
-        width, height = 940, 640
-        self.root.update_idletasks()
-        x = max(0, (self.root.winfo_screenwidth() - width) // 2)
-        y = max(0, (self.root.winfo_screenheight() - height) // 3)
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _focus_entry(self) -> None:
         if not self._closing:
@@ -637,32 +657,17 @@ class LanChatGUI:
         frame = ttk.Frame(dialog, padding=20)
         frame.pack(fill="both", expand=True)
 
-        fixed = tkfont.nametofont("TkFixedFont")
-        family = fixed.actual("family")
-        size = max(8, abs(int(fixed.actual("size"))))
-        logo = tk.Label(
-            frame,
-            text=BANNER.strip("\n"),
-            font=(family, size),
-            justify="left",
-            anchor="w",
-            cursor="hand2",
-            background="#1e1e1e",
-            foreground="#f2f2f2",
-            padx=14,
-            pady=12,
-            highlightthickness=1,
-            highlightbackground="#3a3a3a",
-        )
+        logo = _make_ascii_logo(frame)
+        logo.configure(cursor="hand2")
         logo.pack(fill="x")
 
         body = (
-            "Peer-to-peer chat for the local network.\n"
-            "Devices find each other with UDP multicast and exchange\n"
-            "messages directly over TCP.\n\n"
+            "Peer-to-peer chat for the local network. Devices find each "
+            "other with UDP multicast and exchange messages directly over "
+            "TCP.\n\n"
             "Python standard library only."
         )
-        ttk.Label(frame, text=body, justify="left", wraplength=500).pack(
+        ttk.Label(frame, text=body, justify="left", wraplength=700).pack(
             anchor="w", pady=(14, 0)
         )
 
@@ -803,6 +808,150 @@ class LanChatGUI:
                 pass
 
 
+class StartPage:
+    """Nickname screen shown before the chat window is created."""
+
+    def __init__(
+        self,
+        root: tk.Tk,
+        nick: str,
+        group: str = DEFAULT_GROUP,
+        discovery_port: int = DEFAULT_PORT,
+        tcp_port: int = 0,
+    ) -> None:
+        self.root = root
+        self.group = group
+        self.discovery_port = discovery_port
+        self.tcp_port = tcp_port
+        self.chat: Optional[LanChatGUI] = None
+
+        self._configure_root()
+
+        self.frame = ttk.Frame(root, padding=30)
+        self.frame.pack(fill="both", expand=True)
+
+        title_family = tkfont.nametofont("TkDefaultFont").actual("family")
+        ttk.Label(
+            self.frame,
+            text="lanchat",
+            font=(title_family, 24, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            self.frame,
+            text="local-network chat",
+        ).pack(anchor="w", pady=(0, 4))
+
+        intro = (
+            "Chat with other devices on your Wi-Fi / local network.\n"
+            "Choose a nickname to get started."
+        )
+        ttk.Label(self.frame, text=intro, justify="left", wraplength=480).pack(
+            anchor="w", pady=(18, 0)
+        )
+
+        form = ttk.Frame(self.frame)
+        form.pack(fill="x", pady=(18, 0))
+        ttk.Label(form, text="Nickname").pack(anchor="w")
+
+        row = ttk.Frame(form)
+        row.pack(fill="x", pady=(4, 0))
+        row.columnconfigure(0, weight=1)
+        self.nick_var = tk.StringVar(value=nick)
+        self.entry = ttk.Entry(
+            row,
+            textvariable=self.nick_var,
+            font=tkfont.nametofont("TkTextFont"),
+        )
+        self.entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.entry.bind("<Return>", self._on_return)
+        self.entry.bind("<KP_Enter>", self._on_return)
+
+        self.start_button = ttk.Button(
+            row, text="Start", command=self._start_chat
+        )
+        self.start_button.grid(row=0, column=1)
+
+        self.entry.focus_set()
+        self.root.after(100, self._focus_entry)
+
+    def _configure_root(self) -> None:
+        self.root.title("lanchat — start")
+        self.root.minsize(460, 400)
+        _center_window(self.root, 560, 440)
+        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+
+    def _focus_entry(self) -> None:
+        try:
+            self.entry.focus_set()
+        except tk.TclError:
+            pass
+
+    def _on_return(self, _event=None):
+        self._start_chat()
+        return "break"
+
+    def _start_chat(self) -> None:
+        if self.chat is not None:
+            return
+
+        nick = " ".join(_clean_text(self.nick_var.get()).split())
+        if not nick:
+            messagebox.showerror(
+                "lanchat", "Please enter a nickname.", parent=self.root
+            )
+            self.entry.focus_set()
+            return
+        if len(nick) > MAX_NICK_LENGTH:
+            messagebox.showerror(
+                "lanchat",
+                f"Nickname can be at most {MAX_NICK_LENGTH} characters.",
+                parent=self.root,
+            )
+            self.entry.focus_set()
+            return
+
+        self.start_button.state(["disabled"])
+        self.start_button.configure(text="Starting…")
+        self.frame.pack_forget()
+        self.root.update_idletasks()
+
+        try:
+            self.chat = LanChatGUI(
+                self.root,
+                nick=nick,
+                group=self.group,
+                discovery_port=self.discovery_port,
+                tcp_port=self.tcp_port,
+            )
+        except OSError as exc:
+            self._restore_start(
+                f"Could not start the chat:\n\n{_clean_text(exc)}"
+            )
+            return
+        except Exception as exc:
+            traceback.print_exc()
+            self._restore_start(
+                f"Could not start the chat:\n\n{_clean_text(exc)}"
+            )
+            return
+
+        self.frame.destroy()
+        self.chat.entry.focus_set()
+
+    def _restore_start(self, message: str) -> None:
+        for child in list(self.root.winfo_children()):
+            if child is not self.frame:
+                child.destroy()
+        self.root.configure(menu="")
+        self.root.unbind("<Control-q>")
+        self._configure_root()
+        self.frame.pack(fill="both", expand=True)
+        self.start_button.configure(text="Start")
+        self.start_button.state(["!disabled"])
+        messagebox.showerror("lanchat", message, parent=self.root)
+        self.entry.focus_set()
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="lanchat-gui",
@@ -850,30 +999,35 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     root.withdraw()
     try:
-        gui = LanChatGUI(
+        start = StartPage(
             root,
             nick=nick,
             group=args.group,
             discovery_port=args.discovery_port,
             tcp_port=args.tcp_port,
         )
-    except OSError as exc:
+    except Exception as exc:
+        traceback.print_exc()
         messagebox.showerror(
             "lanchat",
-            f"Could not start the chat:\n\n{_clean_text(exc)}",
+            f"Could not open the start page:\n\n{_clean_text(exc)}",
             parent=root,
         )
         root.destroy()
         return 1
-    except Exception:
-        root.destroy()
-        raise
 
     root.deiconify()
     try:
         root.mainloop()
     except KeyboardInterrupt:
-        gui._on_close()
+        chat = start.chat
+        if chat is not None and not chat._closing:
+            chat._on_close()
+        else:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
     return 0
 
 
