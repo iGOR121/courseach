@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import math
 import queue
+import random
 import socket
 import sys
 import threading
@@ -20,7 +22,7 @@ import traceback
 from tkinter import messagebox, simpledialog, ttk
 from typing import Dict, List, Optional, Tuple
 
-from .app import App
+from .app import BANNER, App
 from .discovery import DEFAULT_GROUP, DEFAULT_PORT, MAX_NICK_LENGTH, Peer
 
 
@@ -627,14 +629,140 @@ class LanChatGUI:
         self._append_system(f"You are now {new_nick}.")
 
     def _show_about(self) -> None:
-        messagebox.showinfo(
-            "About lanchat",
-            "lanchat\n\n"
+        dialog = tk.Toplevel(self.root)
+        dialog.title("About lanchat")
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        fixed = tkfont.nametofont("TkFixedFont")
+        family = fixed.actual("family")
+        size = max(8, abs(int(fixed.actual("size"))))
+        logo = tk.Label(
+            frame,
+            text=BANNER.strip("\n"),
+            font=(family, size),
+            justify="left",
+            anchor="w",
+            cursor="hand2",
+            background="#1e1e1e",
+            foreground="#f2f2f2",
+            padx=14,
+            pady=12,
+            highlightthickness=1,
+            highlightbackground="#3a3a3a",
+        )
+        logo.pack(fill="x")
+
+        body = (
             "Peer-to-peer chat for the local network.\n"
             "Devices find each other with UDP multicast and exchange\n"
-            "messages directly over TCP.",
-            parent=self.root,
+            "messages directly over TCP.\n\n"
+            "Python standard library only."
         )
+        ttk.Label(frame, text=body, justify="left", wraplength=500).pack(
+            anchor="w", pady=(14, 0)
+        )
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(18, 0))
+        ttk.Button(buttons, text="Close", command=dialog.destroy).pack(
+            side="right"
+        )
+
+        clicks = {"count": 0}
+
+        def on_logo_click(_event=None) -> None:
+            clicks["count"] += 1
+            if clicks["count"] >= 10:
+                # The ASCII logo is a little hidden surprise.
+                logo.unbind("<Button-1>")
+                self._show_confetti(dialog)
+
+        logo.bind("<Button-1>", on_logo_click)
+
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        self._center_dialog(dialog)
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
+
+    def _show_confetti(self, parent: tk.Toplevel) -> None:
+        parent.update_idletasks()
+        width = max(parent.winfo_width(), 360)
+        height = max(parent.winfo_height(), 260)
+        canvas = tk.Canvas(
+            parent,
+            highlightthickness=0,
+            borderwidth=0,
+            background=parent.cget("background"),
+        )
+        canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        try:
+            canvas.tk.call("raise", canvas._w)
+        except tk.TclError:
+            pass
+        canvas.bind("<Button-1>", lambda _event: canvas.destroy())
+
+        colors = (
+            "#e63946",
+            "#f1c40f",
+            "#2ecc71",
+            "#3498db",
+            "#9b59b6",
+            "#e67e22",
+            "#1abc9c",
+            "#ff69b4",
+            "#f39c12",
+            "#00b894",
+        )
+        pieces: List[List[object]] = []
+        for _ in range(110):
+            x = random.uniform(0, width)
+            y = random.uniform(-height, -10)
+            w = random.uniform(5, 10)
+            h = random.uniform(8, 16)
+            fill = random.choice(colors)
+            if random.random() < 0.25:
+                item = canvas.create_oval(
+                    x, y, x + w, y + h, fill=fill, outline=""
+                )
+            else:
+                item = canvas.create_rectangle(
+                    x, y, x + w, y + h, fill=fill, outline=""
+                )
+            pieces.append(
+                [
+                    item,
+                    random.uniform(-1.8, 1.8),
+                    random.uniform(2.5, 6.0),
+                    random.uniform(0, 2 * math.pi),
+                ]
+            )
+        remaining = [120]
+
+        def animate() -> None:
+            remaining[0] -= 1
+            try:
+                if remaining[0] <= 0 or not canvas.winfo_exists():
+                    canvas.destroy()
+                    return
+                for piece in pieces:
+                    item = piece[0]
+                    vx = float(piece[1])
+                    vy = float(piece[2])
+                    phase = float(piece[3])
+                    piece[2] = min(vy + 0.12, 9.0)
+                    piece[3] = phase + 0.14
+                    canvas.move(item, vx + math.sin(phase) * 1.3, piece[2])
+                canvas.after(33, animate)
+            except tk.TclError:
+                pass
+
+        animate()
 
     def _center_dialog(self, dialog: tk.Toplevel) -> None:
         dialog.update_idletasks()
